@@ -21,6 +21,7 @@ export default class CompletionAdapterOpenAIChatGPT
     finishReason?: string;
     error?: string;
   }> => {
+    const model = this.options.model || "gpt-4o-mini";
     const resp = await fetch("https://api.openai.com/v1/chat/completions", {
       method: "POST",
       headers: {
@@ -28,7 +29,7 @@ export default class CompletionAdapterOpenAIChatGPT
         Authorization: `Bearer ${this.options.openAiApiKey}`,
       },
       body: JSON.stringify({
-        model: this.options.model || "gpt-4o-mini",
+        model,
         messages: [
           {
             role: "user",
@@ -36,7 +37,7 @@ export default class CompletionAdapterOpenAIChatGPT
           },
         ],
         temperature: this.options.expert?.temperature || 0.7,
-        max_tokens: maxTokens,
+        max_completion_tokens: maxTokens,
         stop, //param
       }),
     });
