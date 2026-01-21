@@ -38,7 +38,7 @@ export default class CompletionAdapterOpenAIChatGPT
         ],
         temperature: this.options.expert?.temperature || 0.7,
         max_completion_tokens: maxTokens,
-        stop, //param
+        ...this.options.extraRequestBodyParameters,
       }),
     });
     const data = await resp.json();
