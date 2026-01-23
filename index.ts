@@ -23,7 +23,7 @@ export default class CompletionAdapterOpenAIChatGPT
   }> => {
     // stop parameter is alredy not supported
     // adapter users should explicitely ask model to stop at dot if needed (or "Complete only up to the end of sentence")
-    const model = this.options.model || "gpt-4o-mini";
+    const model = this.options.model || "gpt-5-nano";
     const resp = await fetch("https://api.openai.com/v1/chat/completions", {
       method: "POST",
       headers: {
@@ -38,7 +38,6 @@ export default class CompletionAdapterOpenAIChatGPT
             content, //param
           },
         ],
-        temperature: this.options.expert?.temperature || 0.7,
         max_completion_tokens: maxTokens,
         ...this.options.extraRequestBodyParameters,
       }),
