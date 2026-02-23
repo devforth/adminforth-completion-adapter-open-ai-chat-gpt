@@ -16,7 +16,7 @@ export default class CompletionAdapterOpenAIChatGPT
     }
   }
 
-  complete = async (content: string, stop = ["."], maxTokens = 50): Promise<{
+  complete = async (content: string, stop = ["."], maxTokens = 50, outputSchema?: any): Promise<{
     content?: string;
     finishReason?: string;
     error?: string;
@@ -39,6 +39,10 @@ export default class CompletionAdapterOpenAIChatGPT
           },
         ],
         max_completion_tokens: maxTokens,
+        response_format: outputSchema ? {      
+          type: "json_schema",
+          ...outputSchema,
+        } : undefined,
         ...this.options.extraRequestBodyParameters,
       }),
     });
