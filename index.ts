@@ -1,6 +1,6 @@
 import type { AdapterOptions } from "./types.js";
 import type { CompletionAdapter } from "adminforth";
-
+import { encoding_for_model, type TiktokenModel } from "tiktoken";
 export default class CompletionAdapterOpenAIChatGPT
   implements CompletionAdapter
 {
@@ -14,6 +14,15 @@ export default class CompletionAdapterOpenAIChatGPT
     if (!this.options.openAiApiKey) {
       throw new Error("openAiApiKey is required");
     }
+  }
+
+
+  measureTokensCount(content: string): number {
+    // Implement token counting logic here
+    const model = this.options.model || "gpt-5-nano";
+    const encoding = encoding_for_model(model as TiktokenModel);
+    const tokens = encoding.encode(content);
+    return tokens.length;
   }
 
   complete = async (content: string, stop = ["."], maxTokens = 50, outputSchema?: any): Promise<{
