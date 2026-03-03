@@ -5,9 +5,13 @@ export default class CompletionAdapterOpenAIChatGPT
   implements CompletionAdapter
 {
   options: AdapterOptions;
+  private encoding: ReturnType<typeof encoding_for_model>;
 
   constructor(options: AdapterOptions) {
     this.options = options;
+    this.encoding = encoding_for_model(
+      (this.options.model || "gpt-5-nano") as TiktokenModel
+    );
   }
 
   validate() {
@@ -16,12 +20,9 @@ export default class CompletionAdapterOpenAIChatGPT
     }
   }
 
-
   measureTokensCount(content: string): number {
     // Implement token counting logic here
-    const model = this.options.model || "gpt-5-nano";
-    const encoding = encoding_for_model(model as TiktokenModel);
-    const tokens = encoding.encode(content);
+    const tokens = this.encoding.encode(content);
     return tokens.length;
   }
 
