@@ -6,8 +6,7 @@
   "type": "module",
   "scripts": {
     "build": "tsc && npm version patch",
-    "rollout": "npm run build && npm publish --access public",
-    "prepare": "npm link adminforth"
+    "rollout": "npm run build && npm publish --access public"
   },
   "keywords": [],
   "author": "",
@@ -18,5 +17,8 @@
   },
   "dependencies": {
     "tiktoken": "^1.0.22"
+  },
+  "peerDependencies": {
+    "adminforth": "^2.24.0"
   }
 }
