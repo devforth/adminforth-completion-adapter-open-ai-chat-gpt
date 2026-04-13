@@ -16,6 +16,7 @@
     "typescript": "^5.9.3"
   },
   "dependencies": {
+    "openai": "^6.34.0",
     "tiktoken": "^1.0.22"
   },
   "peerDependencies": {

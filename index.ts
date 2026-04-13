@@ -1,8 +1,76 @@
 import type { AdapterOptions } from "./types.js";
-import type { CompletionAdapter } from "adminforth";
+import type { CompletionAdapter, CompletionStreamEvent } from "adminforth";
 import { encoding_for_model, type TiktokenModel } from "tiktoken";
+import type OpenAI from "openai";
 
-type StreamChunkCallback = (chunk: string) => void | Promise<void>;
+type StreamChunkCallback = (
+  chunk: string,
+  event?: CompletionStreamEvent,
+) => void | Promise<void>;
+
+type ResponseCreateBody = OpenAI.Responses.ResponseCreateParams;
+type OpenAIResponsesSuccess = OpenAI.Responses.Response;
+type OpenAIErrorResponse = {
+  error?: {
+    message?: string;
+    type?: string;
+    param?: string | null;
+    code?: string | null;
+  };
+};
+
+function extractOutputText(data: OpenAIResponsesSuccess): string {
+  let text = "";
+
+  for (const item of data.output ?? []) {
+    if (item.type !== "message" || !Array.isArray(item.content)) continue;
+    for (const part of item.content) {
+      if (part.type === "output_text" && typeof part.text === "string") {
+        text += part.text;
+      }
+    }
+  }
+
+  return text;
+}
+
+function extractReasoning(data: OpenAIResponsesSuccess): string | undefined {
+  let reasoning = "";
+
+  for (const item of data.output ?? []) {
+    if (item.type !== "reasoning") continue;
+
+    for (const part of item.summary ?? []) {
+      if (part?.type === "summary_text" && typeof part.text === "string") {
+        reasoning += part.text;
+      }
+    }
+
+    if (!reasoning) {
+      for (const part of item.content ?? []) {
+        if (part?.type === "reasoning_text" && typeof part.text === "string") {
+          reasoning += part.text;
+        }
+      }
+    }
+  }
+
+  return reasoning || undefined;
+}
+
+function parseSseBlock(block: string) {
+  let event: string | undefined;
+  let data = "";
+
+  for (const rawLine of block.split("\n")) {
+    const line = rawLine.trimEnd();
+    if (!line) continue;
+    if (line.startsWith("event:")) event = line.slice(6).trim();
+    if (line.startsWith("data:")) data += line.slice(5).trim();
+  }
+
+  return data ? { event, data } : null;
+}
 
 export default class CompletionAdapterOpenAIChatGPT
   implements CompletionAdapter
@@ -13,7 +81,7 @@ export default class CompletionAdapterOpenAIChatGPT
   constructor(options: AdapterOptions) {
     this.options = options;
     this.encoding = encoding_for_model(
-      (this.options.model || "gpt-5-nano") as TiktokenModel
+      (this.options.model || "gpt-5-nano") as TiktokenModel,
     );
   }
 
@@ -24,72 +92,77 @@ export default class CompletionAdapterOpenAIChatGPT
   }
 
   measureTokensCount(content: string): number {
-    //TODO: Implement token counting logic
-    const tokens = this.encoding.encode(content);
-    return tokens.length;
+    return this.encoding.encode(content).length;
   }
 
   complete = async (
     content: string,
-    maxTokens: number = 50,
+    maxTokens = 50,
     outputSchema?: any,
+    reasoningEffort: 'none' | 'minimal' | 'low' | 'medium' | 'high' | 'xhigh' = "low",
     onChunk?: StreamChunkCallback,
   ): Promise<{
     content?: string;
     finishReason?: string;
     error?: string;
   }> => {
-    // stop parameter is alredy not supported
-    // adapter users should explicitely ask model to stop at dot if needed (or "Complete only up to the end of sentence")
     const model = this.options.model || "gpt-5-nano";
     const isStreaming = typeof onChunk === "function";
+    const body = {
+      model,
+      input: content,
+      max_output_tokens: maxTokens,
+      stream: isStreaming,
+      text: outputSchema
+        ? {
+            format: {
+              type: "json_schema",
+              ...outputSchema,
+            },
+          }
+        : {
+            format: {
+              type: "text",
+            },
+          },
+        reasoning: {
+          effort: reasoningEffort,
+        }
+    } as ResponseCreateBody;
 
-    const resp = await fetch("https://api.openai.com/v1/chat/completions", {
+    const resp = await fetch("https://api.openai.com/v1/responses", {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
         Authorization: `Bearer ${this.options.openAiApiKey}`,
       },
-      body: JSON.stringify({
-        model,
-        messages: [
-          {
-            role: "user",
-            content,
-          },
-        ],
-        max_completion_tokens: maxTokens,
-        response_format: outputSchema
-          ? {
-              type: "json_schema",
-              ...outputSchema,
-            }
-          : undefined,
-        stream: isStreaming,
-        ...this.options.extraRequestBodyParameters,
-      }),
+      body: JSON.stringify(body),
     });
 
     if (!resp.ok) {
       let errorMessage = `OpenAI request failed with status ${resp.status}`;
       try {
-        const errorData = await resp.json();
-        if (errorData?.error?.message) {
-          errorMessage = errorData.error.message;
-        }
+        const errorData = (await resp.json()) as OpenAIErrorResponse;
+        if (errorData.error?.message) errorMessage = errorData.error.message;
       } catch {}
       return { error: errorMessage };
     }
 
     if (!isStreaming) {
-      const data = await resp.json();
+      const json = await resp.json();
+      const data = json as OpenAIResponsesSuccess & OpenAIErrorResponse;
       if (data.error) {
         return { error: data.error.message };
       }
 
+      const parsedContent = extractOutputText(data);
+      const reasoning = extractReasoning(data);
+
       return {
-        content: data.choices?.[0]?.message?.content,
-        finishReason: data.choices?.[0]?.finish_reason,
+        content: parsedContent,
+        finishReason: data.incomplete_details?.reason
+          ? data.incomplete_details.reason
+          : undefined,
       };
     }
 
@@ -102,91 +175,135 @@ export default class CompletionAdapterOpenAIChatGPT
 
     let buffer = "";
     let fullContent = "";
+    let fullReasoning = "";
     let finishReason: string | undefined;
+
+    const handleEvent = async (event: any, eventType?: string) => {
+      const type = event?.type || eventType;
+
+      if (type === "response.output_text.delta") {
+        const delta = event?.delta || "";
+        if (!delta) return;
+        fullContent += delta;
+        await onChunk?.(delta, { type: "output", delta, text: fullContent });
+        return;
+      }
+
+      if (
+        type === "response.reasoning_summary_text.delta" ||
+        type === "response.reasoning_text.delta"
+      ) {
+        const delta = event?.delta || "";
+        if (!delta) return;
+        fullReasoning += delta;
+        await onChunk?.(delta, {
+          type: "reasoning",
+          delta,
+          text: fullReasoning,
+        });
+        return;
+      }
+
+      if (
+        type === "response.completed" ||
+        type === "response.incomplete"
+      ) {
+        const response = event?.response as OpenAIResponsesSuccess | undefined;
+        if (!response) return;
+
+        const finalContent = extractOutputText(response);
+        if (finalContent.startsWith(fullContent)) {
+          const delta = finalContent.slice(fullContent.length);
+          if (delta) {
+            fullContent = finalContent;
+            await onChunk?.(delta, {
+              type: "output",
+              delta,
+              text: fullContent,
+            });
+          }
+        }
+
+        const finalReasoning = extractReasoning(response) || "";
+        if (finalReasoning.startsWith(fullReasoning)) {
+          const delta = finalReasoning.slice(fullReasoning.length);
+          if (delta) {
+            fullReasoning = finalReasoning;
+            await onChunk?.(delta, {
+              type: "reasoning",
+              delta,
+              text: fullReasoning,
+            });
+          }
+        }
+
+        finishReason =
+          response.incomplete_details?.reason || response.status || finishReason;
+        return;
+      }
+
+      if (type === "response.failed") {
+        throw new Error(
+          event?.response?.error?.message ||
+            event?.error?.message ||
+            "Response failed",
+        );
+      }
+    };
 
     try {
       while (true) {
         const { value, done } = await reader.read();
-        if (done) {
-          break;
-        }
+        if (done) break;
 
         buffer += decoder.decode(value, { stream: true });
 
-        const lines = buffer.split("\n");
-        buffer = lines.pop() || "";
+        const blocks = buffer.split("\n\n");
+        buffer = blocks.pop() || "";
 
-        for (const rawLine of lines) {
-          const line = rawLine.trim();
+        for (const block of blocks) {
+          const parsedBlock = parseSseBlock(block);
+          if (!parsedBlock?.data || parsedBlock.data === "[DONE]") continue;
 
-          if (!line || !line.startsWith("data:")) {
-            continue;
-          }
-
-          const dataStr = line.slice(5).trim();
-
-          if (dataStr === "[DONE]") {
-            return {
-              content: fullContent,
-              finishReason,
-            };
-          }
-
-          let parsed: any;
+          let event: any;
           try {
-            parsed = JSON.parse(dataStr);
+            event = JSON.parse(parsedBlock.data);
           } catch {
             continue;
           }
 
-          if (parsed.error?.message) {
-            return { error: parsed.error.message };
+          if (event?.error?.message) {
+            return { error: event.error.message };
           }
 
-          const choice = parsed.choices?.[0];
-          if (!choice) {
-            continue;
-          }
-
-          if (choice.finish_reason) {
-            finishReason = choice.finish_reason;
-          }
-
-          const chunk = choice.delta?.content ?? "";
-          if (!chunk) {
-            continue;
-          }
-
-          fullContent += chunk;
-          await onChunk(chunk);
+          await handleEvent(event, parsedBlock.event);
         }
       }
 
-      if (buffer.trim().startsWith("data:")) {
-        const dataStr = buffer.trim().slice(5).trim();
-        if (dataStr && dataStr !== "[DONE]") {
+      if (buffer.trim()) {
+        const parsedBlock = parseSseBlock(buffer.trim());
+        if (parsedBlock?.data && parsedBlock.data !== "[DONE]") {
           try {
-            const parsed = JSON.parse(dataStr);
-            const choice = parsed.choices?.[0];
-            const chunk = choice?.delta?.content ?? "";
-            if (chunk) {
-              fullContent += chunk;
-              await onChunk(chunk);
-            }
-            if (choice?.finish_reason) {
-              finishReason = choice.finish_reason;
-            }
-          } catch {}
+            await handleEvent(JSON.parse(parsedBlock.data), parsedBlock.event);
+          } catch (error: any) {
+            return {
+              error: error?.message || "Streaming failed",
+              content: fullContent || undefined,
+              finishReason,
+            };
+          }
         }
       }
 
       return {
-        content: fullContent,
+        content: fullContent || undefined,
         finishReason,
       };
     } catch (error: any) {
       return {
         error: error?.message || "Streaming failed",
+        content: fullContent || undefined,
+        finishReason,
       };
     } finally {
       reader.releaseLock();
