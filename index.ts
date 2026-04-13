@@ -94,7 +94,7 @@ export default class CompletionAdapterOpenAIChatGPT
   measureTokensCount(content: string): number {
     return this.encoding.encode(content).length;
   }
-
+  //@ts-ignore
   complete = async (
     content: string,
     maxTokens = 50,
