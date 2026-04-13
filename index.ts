@@ -28,7 +28,7 @@ export default class CompletionAdapterOpenAIChatGPT
     const tokens = this.encoding.encode(content);
     return tokens.length;
   }
-
+  //@ts-ignore
   complete = async (
     content: string,
     maxTokens: number = 50,
