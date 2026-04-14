@@ -127,6 +127,7 @@ export default class CompletionAdapterOpenAIChatGPT
           },
         reasoning: {
           effort: reasoningEffort,
+          summary: "auto",
         }
     } as ResponseCreateBody;
 
