@@ -85,7 +85,9 @@ async function executeToolCall(
   }
 
   const toolResult = await tool.handler(JSON.parse(toolCall.arguments));
-  return typeof toolResult === "string" ? toolResult : JSON.stringify(toolResult);
+  if (typeof toolResult === "string") return toolResult
+  if (typeof toolResult === "undefined") return ""
+  return JSON.stringify(toolResult);
 }
 
 function parseSseBlock(block: string) {
@@ -139,6 +141,7 @@ export default class CompletionAdapterOpenAIChatGPT
   }> => {
     const model = this.options.model || "gpt-5-nano";
     const isStreaming = typeof onChunk === "function";
+    const extra = this.options.extraRequestBodyParameters;
     let openAiTools: OpenAITool[] | undefined = undefined;
     if (tools && tools.length > 0) {
       openAiTools = tools?.map((tool) => ({
@@ -170,7 +173,8 @@ export default class CompletionAdapterOpenAIChatGPT
         effort: reasoningEffort,
         summary: "auto",
       },
-      tools: openAiTools
+      tools: openAiTools,
+      ...extra
     } as ResponseCreateBody;
 
     const resp = await fetch("https://api.openai.com/v1/responses", {
