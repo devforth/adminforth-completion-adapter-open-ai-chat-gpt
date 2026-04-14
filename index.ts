@@ -1,5 +1,5 @@
 import type { AdapterOptions } from "./types.js";
-import type { CompletionAdapter, CompletionStreamEvent } from "adminforth";
+import type { CompletionAdapter, CompletionStreamEvent, CompletionTool } from "adminforth";
 import { encoding_for_model, type TiktokenModel } from "tiktoken";
 import type OpenAI from "openai";
 
@@ -18,6 +18,11 @@ type OpenAIErrorResponse = {
     code?: string | null;
   };
 };
+type OpenAITool = OpenAI.Responses.Tool;
+type OpenAIFunctionCall = Extract<
+  OpenAI.Responses.ResponseOutputItem,
+  { type: "function_call" }
+>;
 
 function extractOutputText(data: OpenAIResponsesSuccess): string {
   let text = "";
@@ -58,6 +63,31 @@ function extractReasoning(data: OpenAIResponsesSuccess): string | undefined {
   return reasoning || undefined;
 }
 
+function extractFunctionCall(
+  data: OpenAIResponsesSuccess,
+): OpenAIFunctionCall | undefined {
+  for (const item of data.output ?? []) {
+    if (item.type === "function_call") {
+      return item;
+    }
+  }
+
+  return undefined;
+}
+
+async function executeToolCall(
+  toolCall: OpenAIFunctionCall,
+  tools?: CompletionTool[],
+): Promise<string> {
+  const tool = tools?.find((candidate) => candidate.name === toolCall.name);
+  if (!tool) {
+    throw new Error(`Tool "${toolCall.name}" not found`);
+  }
+
+  const toolResult = await tool.handler(JSON.parse(toolCall.arguments));
+  return typeof toolResult === "string" ? toolResult : JSON.stringify(toolResult);
+}
+
 function parseSseBlock(block: string) {
   let event: string | undefined;
   let data = "";
@@ -94,12 +124,13 @@ export default class CompletionAdapterOpenAIChatGPT
   measureTokensCount(content: string): number {
     return this.encoding.encode(content).length;
   }
-  //@ts-ignore
+
   complete = async (
     content: string,
     maxTokens = 50,
     outputSchema?: any,
     reasoningEffort: 'none' | 'minimal' | 'low' | 'medium' | 'high' | 'xhigh' = "low",
+    tools?: CompletionTool[],
     onChunk?: StreamChunkCallback,
   ): Promise<{
     content?: string;
@@ -108,6 +139,16 @@ export default class CompletionAdapterOpenAIChatGPT
   }> => {
     const model = this.options.model || "gpt-5-nano";
     const isStreaming = typeof onChunk === "function";
+    let openAiTools: OpenAITool[] | undefined = undefined;
+    if (tools && tools.length > 0) {
+      openAiTools = tools?.map((tool) => ({
+        type: "function",
+        name: tool.name,
+        description: tool.description,
+        parameters: tool.input_schema,
+        strict: true,
+      }));
+    }
     const body = {
       model,
       input: content,
@@ -125,10 +166,11 @@ export default class CompletionAdapterOpenAIChatGPT
               type: "text",
             },
           },
-        reasoning: {
-          effort: reasoningEffort,
-          summary: "auto",
-        }
+      reasoning: {
+        effort: reasoningEffort,
+        summary: "auto",
+      },
+      tools: openAiTools
     } as ResponseCreateBody;
 
     const resp = await fetch("https://api.openai.com/v1/responses", {
@@ -156,6 +198,22 @@ export default class CompletionAdapterOpenAIChatGPT
         return { error: data.error.message };
       }
 
+      const toolCall = extractFunctionCall(data);
+      if (toolCall) {
+        try {
+          const toolResult = await executeToolCall(toolCall, tools);
+          return {
+            content: toolResult,
+            finishReason: "tool_call",
+          };
+        } catch (error: any) {
+          return {
+            error: error?.message || "Tool execution failed",
+            finishReason: "tool_call",
+          };
+        }
+      }
+
       const parsedContent = extractOutputText(data);
       const reasoning = extractReasoning(data);
 
@@ -178,6 +236,7 @@ export default class CompletionAdapterOpenAIChatGPT
     let fullContent = "";
     let fullReasoning = "";
     let finishReason: string | undefined;
+    let completedResponse: OpenAIResponsesSuccess | undefined;
 
     const handleEvent = async (event: any, eventType?: string) => {
       const type = event?.type || eventType;
@@ -240,6 +299,7 @@ export default class CompletionAdapterOpenAIChatGPT
 
         finishReason =
           response.incomplete_details?.reason || response.status || finishReason;
+        completedResponse = response;
         return;
       }
 
@@ -291,6 +351,38 @@ export default class CompletionAdapterOpenAIChatGPT
               error: error?.message || "Streaming failed",
               content: fullContent || undefined,
               finishReason,
+            };
+          }
+        }
+      }
+
+      if (completedResponse) {
+        const toolCall = extractFunctionCall(completedResponse);
+        if (toolCall) {
+          try {
+            const toolResult = await executeToolCall(toolCall, tools);
+            if (toolResult) {
+              const delta = toolResult.startsWith(fullContent)
+                ? toolResult.slice(fullContent.length)
+                : toolResult;
+              if (delta) {
+                await onChunk?.(delta, {
+                  type: "output",
+                  delta,
+                  text: toolResult,
+                });
+              }
+            }
+
+            return {
+              content: toolResult,
+              finishReason: "tool_call",
+            };
+          } catch (error: any) {
+            return {
+              error: error?.message || "Tool execution failed",
+              content: fullContent || undefined,
+              finishReason: "tool_call",
             };
           }
         }
