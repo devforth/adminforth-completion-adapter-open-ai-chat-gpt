@@ -112,9 +112,18 @@ export default class CompletionAdapterOpenAIChatGPT
 
   constructor(options: AdapterOptions) {
     this.options = options;
-    this.encoding = encoding_for_model(
-      (this.options.model || "gpt-5-nano") as TiktokenModel,
-    );
+    try {
+      this.encoding = encoding_for_model(
+        (this.options.model || "gpt-5-nano") as TiktokenModel,
+      );
+    } catch (error) {
+      console.warn(
+        `Failed to initialize tiktoken tokenizer for model "${this.options.model}", falling back to "gpt-5-nano". Error:`,
+      );
+      this.encoding = encoding_for_model(
+        ("gpt-5-nano") as TiktokenModel,
+      );
+    }
   }
 
   validate() {
