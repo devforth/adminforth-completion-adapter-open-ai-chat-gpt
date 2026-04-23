@@ -5,19 +5,19 @@
   "types": "dist/index.d.ts",
   "type": "module",
   "scripts": {
+    "postinstall": "node ./postinstall.cjs",
     "build": "tsc && npm version patch",
     "rollout": "npm run build && npm publish --access public"
   },
   "keywords": [],
   "author": "",
   "license": "MIT",
-  "description": "",
+  "description": "Deprecated compatibility wrapper for @adminforth/completion-adapter-openai-responses.",
   "devDependencies": {
     "typescript": "^5.9.3"
   },
   "dependencies": {
-    "openai": "^6.34.0",
-    "tiktoken": "^1.0.22"
+    "@adminforth/completion-adapter-openai-responses": "^2.0.19"
   },
   "peerDependencies": {
     "adminforth": "^2.24.0"

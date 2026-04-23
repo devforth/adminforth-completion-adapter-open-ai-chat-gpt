@@ -10,7 +10,7 @@ importers:
     dependencies:
       adminforth:
         specifier: ^2.24.0
-        version: 2.27.0-next.65(@types/node@25.3.3)(typescript@5.9.3)
+        version: 2.41.0(@types/node@25.3.3)(typescript@5.9.3)
       openai:
         specifier: ^6.34.0
         version: 6.34.0(ws@8.19.0)(zod@4.3.6)
@@ -274,8 +274,8 @@ packages:
     resolution: {integrity: sha512-PYAthTa2m2VKxuvSD3DPC/Gy+U+sOA1LAuT8mkmRuvw+NACSaeXEQ+NHcVF7rONl6qcaxV3Uuemwawk+7+SJLw==}
     engines: {node: '>= 0.6'}
 
-  adminforth@2.27.0-next.65:
-    resolution: {integrity: sha512-xOj/THI7Cy0Did9EOYdh6zbnVd9Iar7VUAVrD6+Um3knQVeYrCPGt/y9Zm6MP8fzC/vEX5XeZTuGwcRY+rZiIw==}
+  adminforth@2.41.0:
+    resolution: {integrity: sha512-qchZ9X39EOacVpomMDSfRbehwSch9WSwUQ6wkIby8fvM6dj7DWfYZRfI9JQ3AQJBtRl1NHOIzkKn7rK7SbxJ8g==}
     hasBin: true
 
   ajv@8.18.0:
@@ -1617,7 +1617,7 @@ snapshots:
       mime-types: 2.1.35
       negotiator: 0.6.3
 
-  adminforth@2.27.0-next.65(@types/node@25.3.3)(typescript@5.9.3):
+  adminforth@2.41.0(@types/node@25.3.3)(typescript@5.9.3):
     dependencies:
       '@babel/parser': 7.29.0
       '@clickhouse/client': 1.18.1
