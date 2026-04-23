@@ -10,7 +10,7 @@
     "rollout": "npm run build && npm publish --access public"
   },
   "keywords": [],
-  "author": "",
+  "author": "DevForth (https://devforth.io)",
   "license": "MIT",
   "description": "Deprecated compatibility wrapper for @adminforth/completion-adapter-openai-responses.",
   "devDependencies": {
